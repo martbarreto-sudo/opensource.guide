@@ -22,6 +22,12 @@ cd "$CLAUDE_PROJECT_DIR"
 
 # Install Ruby gems (with binstubs in bin/) and node dependencies.
 # Output is logged to keep the session context clean; bootstrap is idempotent.
-LANG=C.utf8 LC_ALL=C.utf8 script/bootstrap > .claude/hooks/bootstrap.log 2>&1
+# On failure, surface the log tail and abort so the session fails loudly
+# instead of starting with missing dependencies (no false green).
+if ! LANG=C.utf8 LC_ALL=C.utf8 script/bootstrap > .claude/hooks/bootstrap.log 2>&1; then
+  echo "session-start hook: bootstrap FAILED — tail of bootstrap.log:" >&2
+  tail -n 30 .claude/hooks/bootstrap.log >&2
+  exit 1
+fi
 
 echo "session-start hook: dependencies installed, build env configured"

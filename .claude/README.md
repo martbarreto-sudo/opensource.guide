@@ -84,7 +84,7 @@ environment gate → append env vars to `$CLAUDE_ENV_FILE` → run
 | --- | --- | --- |
 | **0 — Gate** | If `CLAUDE_CODE_REMOTE != "true"`, `exit 0`. | Local and CI setups are provably untouched; the hook only acts in the cloud. |
 | **1 — Env** | Append `LANG`, `LC_ALL` (`C.utf8`) and `PAGES_REPO_NWO` to `$CLAUDE_ENV_FILE`. | Persisting (vs. plain `export`) makes the values survive into every later tool call in the session, not only this script. |
-| **2 — Deps** | Run `script/bootstrap`, logging to `.claude/hooks/bootstrap.log`. | Reuses the repo's own bootstrap — the same path humans use — instead of reinventing install. |
+| **2 — Deps** | Run `script/bootstrap`, logging to `.claude/hooks/bootstrap.log`. On a non-zero exit the hook prints the log tail and aborts. | Reuses the repo's own bootstrap — the same path humans use — instead of reinventing install. Failing loudly prevents a "false green" session that would break on the first build. |
 | **3 — Ready** | Print a one-line confirmation. | The session can now build, test and serve. |
 
 ---
@@ -117,42 +117,16 @@ Latest verified local run of the unit suite (`bundle exec rake`):
 The test-config Jekyll build completes cleanly (~15s). No external
 credentials or network services are required for the unit suite.
 
----
-
-## 6. Known limitation — Bundler flag compatibility
-
-`script/bootstrap` installs gems with:
-
-```bash
-bundle install --binstubs bin --path vendor/gems
-```
-
-Recent Bundler releases (present in the current web image) have **removed
-both the `--path` and `--binstubs` flags**. On those versions the gem
-install aborts with an error. Because the failure happens inside a
-`bundle check … || { … }` compound, `set -e` does **not** stop the script:
-`npm install` still runs, `bootstrap` exits `0`, and the hook reports
-success **even though no Ruby gems were installed**.
-
-Symptom: a web session starts "successfully", but `bundle exec jekyll build`
-and the test suite then fail with *"The following gems are missing"*.
-
-**Manual workaround** (until `script/bootstrap` is updated):
-
-```bash
-bundle config set path vendor/gems
-bundle install
-bundle binstubs --all
-```
-
-**Suggested fix** — migrate `script/bootstrap` to the modern Bundler API
-(`bundle config set path …` + `bundle binstubs --all`), or make the hook
-resilient to a non-zero bootstrap exit so the failure is surfaced instead
-of swallowed.
+`script/bootstrap` is Bundler-version-agnostic: it configures the install
+path with `bundle config set --local path vendor/gems` and generates
+binstubs with `bundle binstubs --all`, instead of the removed
+`--path` / `--binstubs` install flags. A failed gem install aborts the
+script (and the hook), so a session can never start with missing
+dependencies.
 
 ---
 
-## 7. Design principles
+## 6. Design principles
 
 - **Guard first.** The environment check is the very first statement — the
   hook is a strict no-op outside the web.
