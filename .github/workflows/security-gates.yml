@@ -1,0 +1,46 @@
+name: Security Gates
+
+# Two defensive gates that run on every PR and push:
+#   1. check-policy-diff     — blocks unreviewed changes to the policy/ trust surface
+#   2. check-artifacts-clean — blocks secrets leaking via build/cache/CI residue
+# Both run under a zero-credential premise: no secrets are needed to execute them.
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  policy-diff:
+    name: 5. Block policy changes without approval
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # full history so the base ref can be diffed
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: check-policy-diff
+        env:
+          # PR labels are exposed so the script can honor an approval label.
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ' ') }}
+          BASE_REF: ${{ github.base_ref && format('origin/{0}', github.base_ref) || '' }}
+        run: python scripts/check_policy_diff.py --path policy/ --approval-label secops-approved
+
+  artifacts-clean:
+    name: 6. Block artifacts carrying secrets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      # If your pipeline builds first, run the build here so residue exists to scan:
+      # - run: make build
+      - name: check-artifacts-clean
+        run: python scripts/check_artifacts_clean.py --root .
